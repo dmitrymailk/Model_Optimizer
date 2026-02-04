@@ -54,7 +54,14 @@ def export_onnx(vae, output_path, opset=17, fp16=False, channels=16, latent_dim=
             
         def forward(self, x):
             # VAE decode expects latent, return_dict=False returns tuple
-            return self.vae.decode(x, return_dict=False)[0]
+            out = self.vae.decode(x, return_dict=False)[0]
+            # logger.info(f"DEBUG: Export Decoder Output Shape: {out.shape}")
+            # print was not showing, trying logger? But logger might be configured weirdly?
+            # actually let's just raise an error with the shape to FORCE seeing it.
+            # raise RuntimeError(f"DEBUG SHAPE: {out.shape}")
+            # No, that stops the build.
+            print(f"DEBUG_SHAPE_PRINT: {out.shape}", file=sys.stderr)
+            return out
 
     model_wrapper = VAEDecoderWrapper(vae)
 
@@ -104,9 +111,10 @@ def export_encoder_onnx(vae, output_path, opset=17, fp16=False, image_size=512):
             else:
                  latents = encoded_output[0]
             
-            # Scale
-            if hasattr(self.vae.config, "scaling_factor") and self.vae.config.scaling_factor is not None:
-                 latents = latents * self.vae.config.scaling_factor
+
+            # Scale - REMOVED to match Torch pipeline behavior
+            # if hasattr(self.vae.config, "scaling_factor") and self.vae.config.scaling_factor is not None:
+            #      latents = latents * self.vae.config.scaling_factor
                  
             return latents
 
@@ -162,6 +170,12 @@ def build_trt_engine(onnx_path, engine_path, fp16=False, verbose=False):
         
         # B=1 for this specific task
         profile.set_shape(input_name, (1, c_val, h_val, w_val), (1, c_val, h_val, w_val), (1, c_val, h_val, w_val))
+        
+        # DEBUG: Print output info
+        for i in range(network.num_outputs):
+            out_tensor = network.get_output(i)
+            logger.info(f"Parsed ONNX OUTPUT {i} '{out_tensor.name}' dims: {out_tensor.shape}")
+
     else:
         # Fallback
         logger.warning(f"Could not determine input dims, using fallback for '{input_name}'")
