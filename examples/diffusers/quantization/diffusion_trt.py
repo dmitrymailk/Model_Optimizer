@@ -186,6 +186,11 @@ def main():
         help="Use torch.autocast() during inference or benchmarking",
     )
     parser.add_argument("--skip-image", action="store_true", help="Skip image generation")
+    parser.add_argument(
+        "--enable-model-cpu-offload",
+        action="store_true",
+        help="Enable model CPU offloading for limited VRAM",
+    )
     args = parser.parse_args()
 
     image_name = args.save_image_as if args.save_image_as else f"{args.model}.png"
@@ -319,7 +324,12 @@ def main():
         device_model.add_embedding = add_embedding
     else:
         raise ValueError("Pipeline does not have a transformer or unet backbone")
-    pipe.to("cuda")
+    
+    if args.enable_model_cpu_offload:
+        print("Enabling model CPU offloading...")
+        pipe.enable_model_cpu_offload()
+    else:
+        pipe.to("cuda")
 
     if not args.skip_image:
         generate_image(pipe, args.prompt, image_name, args.torch_autocast)

@@ -121,8 +121,13 @@ class QuantizationConfig:
 
     def validate(self) -> None:
         """Validate configuration consistency."""
-        if self.format == QuantFormat.FP8 and self.collect_method != CollectMethod.DEFAULT:
-            raise NotImplementedError("Only 'default' collect method is implemented for FP8.")
+        if (
+            self.format == QuantFormat.FP8
+            and self.collect_method != CollectMethod.DEFAULT
+        ):
+            raise NotImplementedError(
+                "Only 'default' collect method is implemented for FP8."
+            )
         if self.quantize_mha and self.format == QuantFormat.INT8:
             raise ValueError("MHA quantization is only supported for FP8, not INT8.")
         if self.compress and self.format == QuantFormat.INT8:
@@ -158,12 +163,16 @@ class ModelConfig:
     """Configuration for model loading and inference."""
 
     model_type: ModelType = ModelType.FLUX_DEV
-    model_dtype: dict[str, torch.dtype] = field(default_factory=lambda: {"default": torch.float16})
+    model_dtype: dict[str, torch.dtype] = field(
+        default_factory=lambda: {"default": torch.float16}
+    )
     backbone: str = ""
     trt_high_precision_dtype: DataType = DataType.HALF
     override_model_path: Path | None = None
     cpu_offloading: bool = False
-    ltx_skip_upsampler: bool = False  # Skip upsampler for LTX-Video (faster calibration)
+    ltx_skip_upsampler: bool = (
+        False  # Skip upsampler for LTX-Video (faster calibration)
+    )
 
     @property
     def model_path(self) -> str:
@@ -185,7 +194,9 @@ class ExportConfig:
     def validate(self) -> None:
         """Validate export configuration."""
         if self.restore_from and not self.restore_from.exists():
-            raise FileNotFoundError(f"Restore checkpoint not found: {self.restore_from}")
+            raise FileNotFoundError(
+                f"Restore checkpoint not found: {self.restore_from}"
+            )
 
         if self.quantized_torch_ckpt_path:
             parent_dir = self.quantized_torch_ckpt_path.parent
@@ -213,7 +224,8 @@ def setup_logging(verbose: bool = False) -> logging.Logger:
 
     # Create custom formatter
     formatter = logging.Formatter(
-        fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+        fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
 
     # Set up console handler
@@ -246,7 +258,9 @@ class PipelineManager:
         self.config = config
         self.logger = logger
         self.pipe: DiffusionPipeline | None = None
-        self.pipe_upsample: LTXLatentUpsamplePipeline | None = None  # For LTX-Video upsampling
+        self.pipe_upsample: LTXLatentUpsamplePipeline | None = (
+            None  # For LTX-Video upsampling
+        )
 
     @staticmethod
     def create_pipeline_from(
@@ -265,7 +279,9 @@ class PipelineManager:
         """
         try:
             model_id = (
-                MODEL_REGISTRY[model_type] if override_model_path is None else override_model_path
+                MODEL_REGISTRY[model_type]
+                if override_model_path is None
+                else override_model_path
             )
             pipe = MODEL_PIPELINE[model_type].from_pretrained(
                 model_id,
@@ -297,7 +313,9 @@ class PipelineManager:
                 self.config.model_path,
                 torch_dtype=self.config.model_dtype,
                 use_safetensors=True,
-                **MODEL_DEFAULTS[self.config.model_type].get("from_pretrained_extra_args", {}),
+                **MODEL_DEFAULTS[self.config.model_type].get(
+                    "from_pretrained_extra_args", {}
+                ),
             )
             if self.config.model_type == ModelType.LTX_VIDEO_DEV:
                 # Optionally load the upsampler pipeline for LTX-Video
@@ -310,7 +328,9 @@ class PipelineManager:
                     )
                     self.pipe_upsample.set_progress_bar_config(disable=True)
                 else:
-                    self.logger.info("Skipping upsampler pipeline for faster calibration")
+                    self.logger.info(
+                        "Skipping upsampler pipeline for faster calibration"
+                    )
             self.pipe.set_progress_bar_config(disable=True)
 
             self.logger.info("Pipeline created successfully")
@@ -388,7 +408,9 @@ class Calibrator:
         Returns:
             List of batched calibration prompts
         """
-        self.logger.info(f"Loading calibration prompts from {self.config.prompts_dataset}")
+        self.logger.info(
+            f"Loading calibration prompts from {self.config.prompts_dataset}"
+        )
         if isinstance(self.config.prompts_dataset, Path):
             return load_calib_prompts(
                 self.config.batch_size,
@@ -410,9 +432,13 @@ class Calibrator:
             batched_prompts: List of batched calibration prompts
         """
         self.logger.info(f"Starting calibration with {self.config.num_batches} batches")
-        extra_args = MODEL_DEFAULTS.get(self.model_type, {}).get("inference_extra_args", {})
+        extra_args = MODEL_DEFAULTS.get(self.model_type, {}).get(
+            "inference_extra_args", {}
+        )
 
-        with tqdm(total=self.config.num_batches, desc="Calibration", unit="batch") as pbar:
+        with tqdm(
+            total=self.config.num_batches, desc="Calibration", unit="batch"
+        ) as pbar:
             for i, prompt_batch in enumerate(batched_prompts):
                 if i >= self.config.num_batches:
                     break
@@ -420,7 +446,10 @@ class Calibrator:
                 if self.model_type == ModelType.LTX_VIDEO_DEV:
                     # Special handling for LTX-Video
                     self._run_ltx_video_calibration(prompt_batch, extra_args)
-                elif self.model_type in [ModelType.WAN22_T2V_14b, ModelType.WAN22_T2V_5b]:
+                elif self.model_type in [
+                    ModelType.WAN22_T2V_14b,
+                    ModelType.WAN22_T2V_5b,
+                ]:
                     # Special handling for WAN video models
                     self._run_wan_video_calibration(prompt_batch, extra_args)
                 else:
@@ -430,7 +459,9 @@ class Calibrator:
                     }
                     self.pipe(**common_args, **extra_args).images  # type: ignore[misc]
                 pbar.update(1)
-                self.logger.debug(f"Completed calibration batch {i + 1}/{self.config.num_batches}")
+                self.logger.debug(
+                    f"Completed calibration batch {i + 1}/{self.config.num_batches}"
+                )
         self.logger.info("Calibration completed successfully")
 
     def _run_wan_video_calibration(
@@ -463,7 +494,8 @@ class Calibrator:
         expected_width = extra_args.get("width", 704)
         num_frames = extra_args.get("num_frames", 121)
         negative_prompt = extra_args.get(
-            "negative_prompt", "worst quality, inconsistent motion, blurry, jittery, distorted"
+            "negative_prompt",
+            "worst quality, inconsistent motion, blurry, jittery, distorted",
         )
 
         def round_to_nearest_resolution_acceptable_by_vae(height, width):
@@ -477,8 +509,10 @@ class Calibrator:
             int(expected_height * downscale_factor),
             int(expected_width * downscale_factor),
         )
-        downscaled_height, downscaled_width = round_to_nearest_resolution_acceptable_by_vae(
-            downscaled_height, downscaled_width
+        downscaled_height, downscaled_width = (
+            round_to_nearest_resolution_acceptable_by_vae(
+                downscaled_height, downscaled_width
+            )
         )
 
         # Generate initial latents at lower resolution
@@ -505,7 +539,10 @@ class Quantizer:
     """Handles model quantization operations."""
 
     def __init__(
-        self, config: QuantizationConfig, model_config: ModelConfig, logger: logging.Logger
+        self,
+        config: QuantizationConfig,
+        model_config: ModelConfig,
+        logger: logging.Logger,
     ):
         """
         Initialize quantizer.
@@ -584,7 +621,9 @@ class Quantizer:
         mtq.quantize(backbone, quant_config, forward_loop)
         # Get model-specific filter function
         model_filter_func = get_model_filter_func(self.model_config.model_type)
-        self.logger.info(f"Using filter function for {self.model_config.model_type.value}")
+        self.logger.info(
+            f"Using filter function for {self.model_config.model_type.value}"
+        )
 
         self.logger.info("Disabling specific quantizers...")
         mtq.disable_quantizer(backbone, model_filter_func)
@@ -617,7 +656,9 @@ class ExportManager:
             True if model contains Conv layers, False otherwise
         """
         for module in model.modules():
-            if isinstance(module, (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)) and (
+            if isinstance(
+                module, (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)
+            ) and (
                 module.input_quantizer.is_enabled or module.weight_quantizer.is_enabled
             ):
                 return True
@@ -633,7 +674,9 @@ class ExportManager:
         if not self.config.quantized_torch_ckpt_path:
             return
 
-        self.logger.info(f"Saving quantized checkpoint to {self.config.quantized_torch_ckpt_path}")
+        self.logger.info(
+            f"Saving quantized checkpoint to {self.config.quantized_torch_ckpt_path}"
+        )
         mto.save(backbone, str(self.config.quantized_torch_ckpt_path))
         self.logger.info("Checkpoint saved successfully")
 
@@ -672,7 +715,10 @@ class ExportManager:
         with torch.no_grad():
             self.logger.info("Exporting to ONNX...")
             modelopt_export_sd(
-                backbone, str(self.config.onnx_dir), model_type.value, quant_format.value
+                backbone,
+                str(self.config.onnx_dir),
+                model_type.value,
+                quant_format.value,
             )
 
         self.logger.info("ONNX export completed successfully")
@@ -701,7 +747,9 @@ class ExportManager:
         if not self.config.hf_ckpt_dir:
             return
 
-        self.logger.info(f"Exporting HuggingFace checkpoint to {self.config.hf_ckpt_dir}")
+        self.logger.info(
+            f"Exporting HuggingFace checkpoint to {self.config.hf_ckpt_dir}"
+        )
         export_hf_checkpoint(pipe, export_dir=self.config.hf_ckpt_dir)
         self.logger.info("HuggingFace checkpoint export completed successfully")
 
@@ -768,10 +816,14 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "Example: --component-dtype vae:Half --component-dtype transformer:BFloat16",
     )
     model_group.add_argument(
-        "--override-model-path", type=str, help="Custom path to model (overrides default)"
+        "--override-model-path",
+        type=str,
+        help="Custom path to model (overrides default)",
     )
     model_group.add_argument(
-        "--cpu-offloading", action="store_true", help="Enable CPU offloading for limited VRAM"
+        "--cpu-offloading",
+        action="store_true",
+        help="Enable CPU offloading for limited VRAM",
     )
     model_group.add_argument(
         "--ltx-skip-upsampler",
@@ -806,10 +858,16 @@ def create_argument_parser() -> argparse.ArgumentParser:
         choices=[c.value for c in CollectMethod],
         help="Calibration collection method, works for INT8, not including smoothquant",
     )
-    quant_group.add_argument("--alpha", type=float, default=1.0, help="SmoothQuant alpha parameter")
-    quant_group.add_argument("--lowrank", type=int, default=32, help="SVDQuant lowrank parameter")
     quant_group.add_argument(
-        "--quantize-mha", action="store_true", help="Quantizing MHA into FP8 if its True"
+        "--alpha", type=float, default=1.0, help="SmoothQuant alpha parameter"
+    )
+    quant_group.add_argument(
+        "--lowrank", type=int, default=32, help="SVDQuant lowrank parameter"
+    )
+    quant_group.add_argument(
+        "--quantize-mha",
+        action="store_true",
+        help="Quantizing MHA into FP8 if its True",
     )
     quant_group.add_argument(
         "--compress",
@@ -818,11 +876,18 @@ def create_argument_parser() -> argparse.ArgumentParser:
     )
 
     calib_group = parser.add_argument_group("Calibration Configuration")
-    calib_group.add_argument("--batch-size", type=int, default=2, help="Batch size for calibration")
     calib_group.add_argument(
-        "--calib-size", type=int, default=128, help="Total number of calibration samples"
+        "--batch-size", type=int, default=2, help="Batch size for calibration"
     )
-    calib_group.add_argument("--n-steps", type=int, default=30, help="Number of denoising steps")
+    calib_group.add_argument(
+        "--calib-size",
+        type=int,
+        default=128,
+        help="Total number of calibration samples",
+    )
+    calib_group.add_argument(
+        "--n-steps", type=int, default=30, help="Number of denoising steps"
+    )
     calib_group.add_argument(
         "--prompts-file",
         type=str,
@@ -880,9 +945,9 @@ def main() -> None:
             model_dtype=model_dtype,
             backbone=args.backbone,
             trt_high_precision_dtype=DataType(args.trt_high_precision_dtype),
-            override_model_path=Path(args.override_model_path)
-            if args.override_model_path
-            else None,
+            override_model_path=(
+                Path(args.override_model_path) if args.override_model_path else None
+            ),
             cpu_offloading=args.cpu_offloading,
             ltx_skip_upsampler=args.ltx_skip_upsampler,
         )
@@ -900,9 +965,9 @@ def main() -> None:
 
         if args.prompts_file is not None:
             prompts_file = Path(args.prompts_file)
-            assert prompts_file.exists(), (
-                f"User specified prompts file {prompts_file} does not exist."
-            )
+            assert (
+                prompts_file.exists()
+            ), f"User specified prompts file {prompts_file} does not exist."
             prompts_dataset = prompts_file
         else:
             prompts_dataset = MODEL_DEFAULTS[model_type]["dataset"]
@@ -914,9 +979,11 @@ def main() -> None:
         )
 
         export_config = ExportConfig(
-            quantized_torch_ckpt_path=Path(args.quantized_torch_ckpt_save_path)
-            if args.quantized_torch_ckpt_save_path
-            else None,
+            quantized_torch_ckpt_path=(
+                Path(args.quantized_torch_ckpt_save_path)
+                if args.quantized_torch_ckpt_save_path
+                else None
+            ),
             onnx_dir=Path(args.onnx_dir) if args.onnx_dir else None,
             hf_ckpt_dir=Path(args.hf_ckpt_dir) if args.hf_ckpt_dir else None,
             restore_from=Path(args.restore_from) if args.restore_from else None,
@@ -938,17 +1005,22 @@ def main() -> None:
         if export_config.restore_from and export_config.restore_from.exists():
             export_manager.restore_checkpoint(backbone)
 
-            if export_config.quantized_torch_ckpt_path and not export_config.restore_from.samefile(
-                export_config.restore_from
+            if (
+                export_config.quantized_torch_ckpt_path
+                and not export_config.restore_from.samefile(export_config.restore_from)
             ):
                 export_manager.save_checkpoint(backbone)
         else:
             logger.info("Initializing calibration...")
-            calibrator = Calibrator(pipeline_manager, calib_config, model_config.model_type, logger)
+            calibrator = Calibrator(
+                pipeline_manager, calib_config, model_config.model_type, logger
+            )
             batched_prompts = calibrator.load_and_batch_prompts()
 
             quantizer = Quantizer(quant_config, model_config, logger)
-            backbone_quant_config = quantizer.get_quant_config(calib_config.n_steps, backbone)
+            backbone_quant_config = quantizer.get_quant_config(
+                calib_config.n_steps, backbone
+            )
 
             def forward_loop(mod):
                 calibrator.run_calibration(batched_prompts)
