@@ -60,3 +60,4 @@ venv/
 **.tar.gz
 **.nemo
 **.onnx_data
+**.onnx.data
