@@ -20,36 +20,47 @@ def parse_args():
     parser.add_argument("--output-dir", type=str, default="unet_trt", help="Output directory for ONNX and TRT engine")
     parser.add_argument("--opset", type=int, default=17, help="ONNX opset version")
     parser.add_argument("--fp32", action="store_true", help="Export in FP32 (default is FP16)")
+    parser.add_argument("--model-path", type=str, default=None, help="Path to pretrained model checkpoint")
     return parser.parse_args()
 
-def get_unet_model(device, dtype):
-    # Configuration from unet_and_vae.ipynb
-    unet2d_config = {
-        "sample_size": 32,
-        "in_channels": 128,
-        "out_channels": 128,
-        "center_input_sample": False,
-        "time_embedding_type": "positional",
-        "freq_shift": 0,
-        "flip_sin_to_cos": True,
-        "down_block_types": ("DownBlock2D", "DownBlock2D", "DownBlock2D"),
-        "up_block_types": ("UpBlock2D", "UpBlock2D", "UpBlock2D"),
-        "block_out_channels": [320, 640, 1280],
-        "layers_per_block": 1,
-        "mid_block_scale_factor": 1,
-        "downsample_padding": 1,
-        "downsample_type": "conv",
-        "upsample_type": "conv",
-        "dropout": 0.0,
-        "act_fn": "silu",
-        "norm_num_groups": 32,
-        "norm_eps": 1e-05,
-        "resnet_time_scale_shift": "default",
-        "add_attention": False,
-    }
-    
-    logger.info("Creating UNet2DModel with configuration...")
-    unet = UNet2DModel(**unet2d_config).to(device, dtype=dtype)
+def get_unet_model(device, dtype, model_path=None):
+    if model_path:
+        logger.info(f"Loading UNet2DModel from {model_path}...")
+        unet = UNet2DModel.from_pretrained(
+            model_path, 
+            subfolder="unet", 
+            torch_dtype=dtype,
+            use_safetensors=True
+        ).to(device)
+    else:
+        # Configuration from unet_and_vae.ipynb
+        unet2d_config = {
+            "sample_size": 32,
+            "in_channels": 128,
+            "out_channels": 128,
+            "center_input_sample": False,
+            "time_embedding_type": "positional",
+            "freq_shift": 0,
+            "flip_sin_to_cos": True,
+            "down_block_types": ("DownBlock2D", "DownBlock2D", "DownBlock2D"),
+            "up_block_types": ("UpBlock2D", "UpBlock2D", "UpBlock2D"),
+            "block_out_channels": [320, 640, 1280],
+            "layers_per_block": 1,
+            "mid_block_scale_factor": 1,
+            "downsample_padding": 1,
+            "downsample_type": "conv",
+            "upsample_type": "conv",
+            "dropout": 0.0,
+            "act_fn": "silu",
+            "norm_num_groups": 32,
+            "norm_eps": 1e-05,
+            "resnet_time_scale_shift": "default",
+            "add_attention": False,
+        }
+        
+        logger.info("Creating UNet2DModel with configuration (Random Init)...")
+        unet = UNet2DModel(**unet2d_config).to(device, dtype=dtype)
+        
     unet.requires_grad_(False)
     unet.eval()
     return unet
@@ -70,10 +81,20 @@ def export_onnx(unet, output_path, opset=17, fp16=False):
     # latents torch.Size([1, 128, 32, 32])
     # t (timestep) - scalar or batch size 1
     
+    
     B = 1
-    C = 128
-    H = 32
-    W = 32
+    # Use config from loaded model if available
+    if hasattr(unet, "config"):
+        C = unet.config.in_channels
+        H = unet.config.sample_size
+        W = unet.config.sample_size
+        logger.info(f"Using input shape from config: B={B}, C={C}, H={H}, W={W}")
+    else:
+        # Fallback
+        C = 256
+        H = 32
+        W = 32
+        logger.info(f"Using fallback input shape: B={B}, C={C}, H={H}, W={W}")
     
     device = "cuda" if fp16 else "cpu"
     dtype = torch.float16 if fp16 else torch.float32
@@ -123,8 +144,18 @@ def build_trt_engine(onnx_path, engine_path, fp16=False, verbose=False):
     input_tensor = network.get_input(0) # sample
     input_name = input_tensor.name
     
-    # B=1, C=128, H=32, W=32
-    profile.set_shape(input_name, (1, 128, 32, 32), (1, 128, 32, 32), (1, 128, 32, 32))
+    # Infer shape from input tensor if possible
+    # Dimensions: (batch_size, channels, height, width)
+    in_dims = input_tensor.shape
+    logger.info(f"ONNX Input Dims: {in_dims}")
+
+    # Use dimensions from ONNX if they are concrete (>0), else fallback
+    # Assuming B=1, static export
+    C = in_dims[1] if in_dims[1] > 0 else 128
+    H = in_dims[2] if in_dims[2] > 0 else 32
+    W = in_dims[3] if in_dims[3] > 0 else 32
+    
+    profile.set_shape(input_name, (1, C, H, W), (1, C, H, W), (1, C, H, W))
     
     # Also set shape for timestep if it's an input in the network definition
     if network.num_inputs > 1:
@@ -167,7 +198,7 @@ def main():
          dtype = torch.float32
          use_fp16 = False
          
-    unet = get_unet_model(device, dtype)
+    unet = get_unet_model(device, dtype, model_path=args.model_path)
     
     export_onnx(unet, onnx_path, opset=args.opset, fp16=use_fp16)
     
