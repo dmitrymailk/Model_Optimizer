@@ -40,12 +40,21 @@ BENCHMARK_ROUNDS = 200
 # TensorRT Engine Wrappers
 # -----------------------------------------------------------------------------
 class TRTEngine:
+    """
+    TensorRT Engine wrapper with minimal context pool.
+    
+    Uses small pool (3 contexts) with full synchronization to prevent corruption.
+    """
+    
     def __init__(self, engine_path):
         self.logger = trt.Logger(trt.Logger.WARNING)
         self.runtime = trt.Runtime(self.logger)
         self.engine = self._load_engine(engine_path)
-        self.context = self.engine.create_execution_context()
         self.stream = torch.cuda.Stream()
+        
+        # Small pool - just 3 contexts to cycle through
+        self._contexts = [self.engine.create_execution_context() for _ in range(3)]
+        self._context_idx = 0
         
     def _load_engine(self, path):
         if not os.path.exists(path):
@@ -54,19 +63,24 @@ class TRTEngine:
             return self.runtime.deserialize_cuda_engine(f.read())
             
     def infer(self, feed_dict):
-        # Create NEW context for each call to prevent buffer corruption
-        context = self.engine.create_execution_context()
+        """Run inference with cycling context pool and full sync."""
+        # Full device sync before switching context
+        torch.cuda.synchronize()
         
-        bindings = [None] * self.engine.num_io_tensors
+        # Cycle through contexts
+        context = self._contexts[self._context_idx]
+        self._context_idx = (self._context_idx + 1) % 3
+        
         outputs = {}
         
+        # Set up inputs
         for i in range(self.engine.num_io_tensors):
             tensor_name = self.engine.get_tensor_name(i)
             mode = self.engine.get_tensor_mode(tensor_name)
             
             if mode == trt.TensorIOMode.INPUT:
                 if tensor_name not in feed_dict:
-                     raise ValueError(f"Missing input '{tensor_name}'")
+                    raise ValueError(f"Missing input '{tensor_name}'")
                 
                 tensor = feed_dict[tensor_name]
                 if tensor.dtype != torch.float16:
@@ -76,18 +90,23 @@ class TRTEngine:
                     
                 context.set_input_shape(tensor_name, tensor.shape)
                 context.set_tensor_address(tensor_name, tensor.data_ptr())
-                bindings[i] = tensor.data_ptr()
-            else:
+        
+        # Allocate fresh outputs for each call
+        for i in range(self.engine.num_io_tensors):
+            tensor_name = self.engine.get_tensor_name(i)
+            mode = self.engine.get_tensor_mode(tensor_name)
+            
+            if mode == trt.TensorIOMode.OUTPUT:
                 shape = context.get_tensor_shape(tensor_name)
-                # Resolve dynamic shapes
                 resolved_shape = list(shape)
+                
                 if -1 in resolved_shape:
-                     batch_size = list(feed_dict.values())[0].shape[0]
-                     if resolved_shape[0] == -1: resolved_shape[0] = batch_size
+                    batch_size = list(feed_dict.values())[0].shape[0]
+                    if resolved_shape[0] == -1:
+                        resolved_shape[0] = batch_size
                 
                 output_tensor = torch.empty(tuple(resolved_shape), dtype=torch.float16, device="cuda")
                 context.set_tensor_address(tensor_name, output_tensor.data_ptr())
-                bindings[i] = output_tensor.data_ptr()
                 outputs[tensor_name] = output_tensor
 
         context.execute_async_v3(stream_handle=self.stream.cuda_stream)
