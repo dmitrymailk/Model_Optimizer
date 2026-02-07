@@ -19,7 +19,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Optimize Flux VAE Decoder")
     parser.add_argument("--model-path", type=str, default="black-forest-labs/FLUX.1-dev", help="HuggingFace model ID or local path")
     parser.add_argument("--output-dir", type=str, default="flux_vae_trt", help="Output directory for ONNX and TRT engine")
-    parser.add_argument("--opset", type=int, default=17, help="ONNX opset version")
+    parser.add_argument("--opset", type=int, default=18, help="ONNX opset version")
     parser.add_argument("--fp16", action="store_true", help="Export in FP16 (requires GPU)")
     parser.add_argument("--batch-size", type=int, default=1, help="Batch size for optimization profile")
     parser.add_argument("--latent-dim", type=int, default=64, help="Latent dimension (H=W) for export. Default 64 (512px image / 8). Use 32 for Tiny AutoEncoder on 512px.")
@@ -244,18 +244,12 @@ def main():
     # --- ENCODER ---
     logger.info("--- Processing Encoder ---")
     export_encoder_onnx(vae, enc_onnx_path, opset=args.opset, fp16=args.fp16, image_size=512)
-    if os.path.exists(enc_onnx_path):
-        build_trt_engine(enc_onnx_path, enc_engine_path, fp16=args.fp16)
-    else:
-        logger.error("Encoder ONNX export failed.")
+    build_trt_engine(enc_onnx_path, enc_engine_path, fp16=args.fp16)
 
     # --- DECODER ---
     logger.info("--- Processing Decoder ---")
     export_onnx(vae, dec_onnx_path, opset=args.opset, fp16=args.fp16, channels=channels, latent_dim=args.latent_dim)
-    if os.path.exists(dec_onnx_path):
-        build_trt_engine(dec_onnx_path, dec_engine_path, fp16=args.fp16)
-    else:
-        logger.error("Decoder ONNX export failed.")
+    build_trt_engine(dec_onnx_path, dec_engine_path, fp16=args.fp16)
     
     logger.info("Done.")
 
