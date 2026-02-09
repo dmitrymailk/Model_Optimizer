@@ -8,11 +8,12 @@ $env:PATH = "C:\programming\auto_remaster\inference_optimization\TensorRT-10.15.
 
 # Run optimization for UNet
 # Model Path: checkpoint-299200
-$ModelPath = "c:\programming\auto_remaster\inference_optimization\models\lbm_train_test_gap_tiny\checkpoint-299200"
+$ModelPath = "C:\programming\auto_remaster\inference_optimization\models\lbm_train_test_gap_tiny_v6_upscale_2x\checkpoint-128000"
+$OutputDir = "unet_trt_v6_upscale_2x"
 
 # Clean output directory
-if (Test-Path "unet_trt") {
-    Remove-Item -Recurse -Force "unet_trt"
+if (Test-Path $OutputDir) {
+    Remove-Item -Recurse -Force $OutputDir
 }
 
-. "C:\programming\auto_remaster\venv\Scripts\Activate.ps1"; python optimize_unet.py --model-path $ModelPath --output-dir "unet_trt" --opset 18
+. "C:\programming\auto_remaster\venv\Scripts\Activate.ps1"; python optimize_unet.py --model-path $ModelPath --output-dir $OutputDir --opset 18
